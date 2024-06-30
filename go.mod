@@ -11,7 +11,7 @@ require (
 	github.com/google/go-cmp v0.6.0
 	github.com/google/go-github/v60 v60.0.0
 	github.com/haya14busa/go-actions-toolkit v0.0.0-20200105081403-ca0307860f01
-	github.com/haya14busa/go-sarif v0.0.0-20210102043135-e2c5fed2fa3d
+	github.com/haya14busa/go-sarif v0.0.0-20240630170108-a3ba8d79599f
 	github.com/haya14busa/secretbox v0.0.0-20180525171038-07c7ecf409f5
 	github.com/justinas/nosurf v1.1.1
 	github.com/kylelemons/godebug v1.1.0
@@ -54,7 +54,7 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.3.2 // indirect
 	github.com/googleapis/gax-go/v2 v2.12.4 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
-	github.com/hashicorp/go-retryablehttp v0.7.2 // indirect
+	github.com/hashicorp/go-retryablehttp v0.7.7 // indirect
 	github.com/hashicorp/go-version v1.6.0 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect

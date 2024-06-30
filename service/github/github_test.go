@@ -69,7 +69,7 @@ func TestGitHubPullRequest_Post(t *testing.T) {
 	pr := 2
 	sha := "cce89afa9ac5519a7f5b1734db2e3aa776b138a7"
 
-	g, err := NewGitHubPullRequest(client, owner, repo, pr, sha, "warning")
+	g, err := NewGitHubPullRequest(client, owner, repo, pr, sha, "warning", "tool-name")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,45 +94,6 @@ func TestGitHubPullRequest_Post(t *testing.T) {
 	}
 }
 
-func TestGitHubPullRequest_Diff(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping test which contains actual API requests in short mode")
-	}
-	client := setupGitHubClient()
-	if client == nil {
-		t.Skip(notokenSkipTestMes)
-	}
-
-	want := `diff --git a/.codecov.yml b/.codecov.yml
-index aa49124774..781ee2492f 100644
---- a/.codecov.yml
-+++ b/.codecov.yml
-@@ -7,5 +7,4 @@ coverage:
-       default:
-         target: 0%
- 
--comment:
--  layout: "header"
-+comment: false
-`
-
-	// https://github.com/reviewdog/reviewdog/pull/73
-	owner := "haya14busa"
-	repo := "reviewdog"
-	pr := 73
-	g, err := NewGitHubPullRequest(client, owner, repo, pr, "", "warning")
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := g.Diff(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := string(b); got != want {
-		t.Errorf("got:\n%v\nwant:\n%v", got, want)
-	}
-}
-
 func TestGitHubPullRequest_comment(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping test which contains actual API requests in short mode")
@@ -145,7 +106,7 @@ func TestGitHubPullRequest_comment(t *testing.T) {
 	owner := "haya14busa"
 	repo := "reviewdog"
 	pr := 2
-	g, err := NewGitHubPullRequest(client, owner, repo, pr, "", "warning")
+	g, err := NewGitHubPullRequest(client, owner, repo, pr, "", "warning", "tool-name")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +133,8 @@ func TestGitHubPullRequest_Post_Flush_review_api(t *testing.T) {
 
 	listCommentsAPICalled := 0
 	postCommentsAPICalled := 0
-	repoCommentsAPICalled := 0
+	repoAPICalled := 0
+	delCommentsAPICalled := 0
 	mux := http.NewServeMux()
 	mux.HandleFunc("/repos/o/r/pulls/14/comments", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -198,6 +160,20 @@ func TestGitHubPullRequest_Post_Flush_review_api(t *testing.T) {
 						Path:        github.String("reviewdog.go"),
 						Line:        github.Int(15),
 						Body:        github.String(commentutil.BodyPrefix + "already commented 2" + "\n<!-- __reviewdog__:ChAxNDgzY2EyNTY0MjU2NmYx -->\n"),
+						SubjectType: github.String("line"),
+					},
+					{
+						ID:          github.Int64(1414),
+						Path:        github.String("reviewdog.go"),
+						Line:        github.Int(15),
+						Body:        github.String(commentutil.BodyPrefix + "already commented [outdated]" + "\n<!-- __reviewdog__:Cg9jY2FlN2NlYTg0M2M0MDISCXRvb2wtbmFtZQ== -->\n"),
+						SubjectType: github.String("line"),
+					},
+					{
+						ID:          github.Int64(1414),
+						Path:        github.String("reviewdog.go"),
+						Line:        github.Int(15),
+						Body:        github.String(commentutil.BodyPrefix + "already commented [different tool]" + "\n<!-- __reviewdog__:CgZ4eHh4eHgSDmRpZmZlcmVudC10b29s -->\n"),
 						SubjectType: github.String("line"),
 					},
 					{
@@ -529,19 +505,22 @@ func TestGitHubPullRequest_Post_Flush_review_api(t *testing.T) {
 		}
 	})
 	mux.HandleFunc("/repos/o/r", func(w http.ResponseWriter, r *http.Request) {
-		repoCommentsAPICalled++
+		repoAPICalled++
 		if err := json.NewEncoder(w).Encode(&github.Repository{
 			HTMLURL: github.String("https://test/repo/path"),
 		}); err != nil {
 			t.Fatal(err)
 		}
 	})
+	mux.HandleFunc("/repos/o/r/pulls/comments/1414", func(w http.ResponseWriter, r *http.Request) {
+		delCommentsAPICalled++
+	})
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 
 	cli := github.NewClient(nil)
 	cli.BaseURL, _ = url.Parse(ts.URL + "/")
-	g, err := NewGitHubPullRequest(cli, "o", "r", 14, "sha", "warning")
+	g, err := NewGitHubPullRequest(cli, "o", "r", 14, "sha", "warning", "tool-name")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1277,6 +1256,12 @@ func TestGitHubPullRequest_Post_Flush_review_api(t *testing.T) {
 	if postCommentsAPICalled != 1 {
 		t.Errorf("GitHub post PullRequest comments API called %v times, want 1 times", postCommentsAPICalled)
 	}
+	if repoAPICalled != 1 {
+		t.Errorf("GitHub Repository API called %v times, want 1 times", repoAPICalled)
+	}
+	if delCommentsAPICalled != 1 {
+		t.Errorf("GitHub Delete PullRequest comments API called %v times, want 1 times", delCommentsAPICalled)
+	}
 }
 
 func TestGitHubPullRequest_Post_toomany(t *testing.T) {
@@ -1310,7 +1295,7 @@ func TestGitHubPullRequest_Post_toomany(t *testing.T) {
 
 	cli := github.NewClient(nil)
 	cli.BaseURL, _ = url.Parse(ts.URL + "/")
-	g, err := NewGitHubPullRequest(cli, "o", "r", 14, "sha", "warning")
+	g, err := NewGitHubPullRequest(cli, "o", "r", 14, "sha", "warning", "tool-name")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1355,7 +1340,7 @@ func TestGitHubPullRequest_workdir(t *testing.T) {
 	moveToRootDir()
 	defer setupEnvs()()
 
-	g, err := NewGitHubPullRequest(nil, "", "", 0, "", "warning")
+	g, err := NewGitHubPullRequest(nil, "", "", 0, "", "warning", "tool-name")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1374,7 +1359,7 @@ func TestGitHubPullRequest_workdir(t *testing.T) {
 	if err := os.Chdir(subDir); err != nil {
 		t.Fatal(err)
 	}
-	g, _ = NewGitHubPullRequest(nil, "", "", 0, "", "warning")
+	g, _ = NewGitHubPullRequest(nil, "", "", 0, "", "warning", "tool-name")
 	if g.wd != subDir {
 		t.Fatalf("gitRelWorkdir() = %q, want %q", g.wd, subDir)
 	}
@@ -1384,112 +1369,6 @@ func TestGitHubPullRequest_workdir(t *testing.T) {
 		Diagnostic: &rdf.Diagnostic{Location: &rdf.Location{Path: want}}}})
 	if got := g.postComments[0].Result.Diagnostic.GetLocation().GetPath(); got != wantPath {
 		t.Errorf("wd=%q path=%q, want %q", g.wd, got, wantPath)
-	}
-}
-
-func TestGitHubPullRequest_Diff_fake(t *testing.T) {
-	apiCalled := 0
-	mux := http.NewServeMux()
-	mux.HandleFunc("/repos/o/r/pulls/14", func(w http.ResponseWriter, r *http.Request) {
-		apiCalled++
-		if r.Method != http.MethodGet {
-			t.Errorf("unexpected access: %v %v", r.Method, r.URL)
-		}
-		if accept := r.Header.Get("Accept"); !strings.Contains(accept, "diff") {
-			t.Errorf("Accept header doesn't contain 'diff': %v", accept)
-		}
-		w.Write([]byte("Pull Request diff"))
-	})
-	ts := httptest.NewServer(mux)
-	defer ts.Close()
-
-	cli := github.NewClient(nil)
-	cli.BaseURL, _ = url.Parse(ts.URL + "/")
-	g, err := NewGitHubPullRequest(cli, "o", "r", 14, "sha", "warning")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := g.Diff(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if apiCalled != 1 {
-		t.Errorf("GitHub API should be called once; called %v times", apiCalled)
-	}
-}
-
-func TestGitHubPullRequest_Diff_fake_fallback(t *testing.T) {
-	apiCalled := 0
-	mux := http.NewServeMux()
-	headSHA := "HEAD^"
-	baseSHA := "HEAD"
-	mux.HandleFunc("/repos/o/r/pulls/14", func(w http.ResponseWriter, r *http.Request) {
-		apiCalled++
-		if r.Method != http.MethodGet {
-			t.Errorf("unexpected access: %v %v", r.Method, r.URL)
-		}
-		if accept := r.Header.Get("Accept"); strings.Contains(accept, "diff") {
-			w.WriteHeader(http.StatusNotAcceptable)
-			return
-		}
-		if accept := r.Header.Get("Accept"); accept != "application/vnd.github.v3+json" {
-			t.Errorf("Accept header doesn't contain 'diff': %v", accept)
-		}
-
-		pullRequestJSON, err := json.Marshal(github.PullRequest{
-			Head: &github.PullRequestBranch{
-				SHA: &headSHA,
-			},
-			Base: &github.PullRequestBranch{
-				SHA: &baseSHA,
-			},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if _, err := w.Write(pullRequestJSON); err != nil {
-			t.Fatal(err)
-		}
-	})
-	mux.HandleFunc("/repos/o/r/compare/"+headSHA+"..."+baseSHA, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			t.Errorf("unexpected access: %v %v", r.Method, r.URL)
-		}
-		if accept := r.Header.Get("Accept"); accept != "application/vnd.github.v3+json" {
-			t.Errorf("Accept header doesn't contain 'diff': %v", accept)
-		}
-
-		mergeBaseSha := "HEAD^"
-
-		commitsComparisonJSON, err := json.Marshal(github.CommitsComparison{
-			MergeBaseCommit: &github.RepositoryCommit{
-				SHA: &mergeBaseSha,
-			},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if _, err := w.Write(commitsComparisonJSON); err != nil {
-			t.Fatal(err)
-		}
-	})
-	ts := httptest.NewServer(mux)
-	defer ts.Close()
-
-	t.Setenv("REVIEWDOG_SKIP_GIT_FETCH", "true")
-
-	cli := github.NewClient(nil)
-	cli.BaseURL, _ = url.Parse(ts.URL + "/")
-	g, err := NewGitHubPullRequest(cli, "o", "r", 14, "sha", "warning")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := g.Diff(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if apiCalled != 2 {
-		t.Errorf("GitHub API should be called twice; called %v times", apiCalled)
 	}
 }
 
@@ -1518,7 +1397,7 @@ func TestGitHubPullRequest_Post_NoPermission(t *testing.T) {
 
 	cli := github.NewClient(nil)
 	cli.BaseURL, _ = url.Parse(ts.URL + "/")
-	g, err := NewGitHubPullRequest(cli, "o", "r", 14, "sha", "warning")
+	g, err := NewGitHubPullRequest(cli, "o", "r", 14, "sha", "warning", "tool-name")
 	if err != nil {
 		t.Fatal(err)
 	}
